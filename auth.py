@@ -14,7 +14,6 @@ from pathlib import Path
 from datetime import datetime
 
 USERS_FILE = Path(__file__).parent / "users.yaml"
-SESSION_FILE = Path(__file__).parent / "active_session.json"
 
 
 def _load_users() -> dict:
@@ -32,35 +31,6 @@ def _save_users(data: dict):
         yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
 
 
-def _load_session() -> dict:
-    """Load persistent session from disk."""
-    if not SESSION_FILE.exists():
-        return {}
-    try:
-        with open(SESSION_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _save_session(data: dict):
-    """Save persistent session to disk."""
-    try:
-        with open(SESSION_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-    except Exception:
-        pass
-
-
-def _clear_session():
-    """Clear persistent session from disk."""
-    try:
-        if SESSION_FILE.exists():
-            SESSION_FILE.unlink()
-    except Exception:
-        pass
-
-
 def _hash_password(password: str) -> str:
     """Hash a password using bcrypt."""
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -75,33 +45,8 @@ def _verify_password(password: str, hashed: str) -> bool:
 
 
 def is_authenticated() -> bool:
-    """Check if a user is currently logged in, with persistent session across page reloads."""
-    if st.session_state.get("authenticated", False):
-        return True
-
-    # Check query params or persistent local session
-    active = _load_session()
-    if active and active.get("profile"):
-        token = active.get("token")
-        profile = active.get("profile", {})
-        
-        # Verify query param if present
-        param_token = None
-        try:
-            param_token = st.query_params.get("session")
-        except Exception:
-            pass
-
-        if not param_token or param_token == token:
-            st.session_state.authenticated = True
-            st.session_state.user_profile = profile
-            try:
-                st.query_params["session"] = token
-            except Exception:
-                pass
-            return True
-
-    return False
+    """Check if a user is currently logged in strictly within their active session."""
+    return bool(st.session_state.get("authenticated", False) and st.session_state.get("user_profile"))
 
 
 def get_current_user() -> dict:
@@ -122,10 +67,11 @@ def get_current_user() -> dict:
 
 
 def logout():
-    """Log out the current user and wipe session."""
+    """Log out the current user and wipe active session."""
     st.session_state.authenticated = False
     st.session_state.user_profile = {}
-    _clear_session()
+    if "mobile_menu_open" in st.session_state:
+        st.session_state.mobile_menu_open = False
     try:
         st.query_params.clear()
     except Exception:
@@ -134,7 +80,7 @@ def logout():
 
 
 def _do_login(username: str, password: str) -> bool:
-    """Validate credentials and set persistent session on success."""
+    """Validate credentials and authenticate the current user session."""
     data = _load_users()
     users = data.get("users", {})
     user = users.get(username)
@@ -146,20 +92,10 @@ def _do_login(username: str, password: str) -> bool:
             "role": user.get("role", "reader"),
             "joined": user.get("joined", ""),
         }
-        token = hashlib.sha256(f"{username}:{datetime.now().isoformat()}".encode()).hexdigest()[:24]
-        
         st.session_state.authenticated = True
         st.session_state.user_profile = profile
-        
-        _save_session({
-            "token": token,
-            "username": username,
-            "profile": profile,
-            "logged_in_at": datetime.now().isoformat(),
-        })
-        
         try:
-            st.query_params["session"] = token
+            st.query_params.clear()
         except Exception:
             pass
         return True
@@ -247,18 +183,11 @@ def _do_register(username: str, password: str, name: str, email: str) -> tuple:
     data["users"] = users
     _save_users(data)
 
-    # Immediately authenticate and create persistent session
-    token = hashlib.sha256(f"{u}:{datetime.now().isoformat()}".encode()).hexdigest()[:24]
+    # Immediately authenticate in active session
     st.session_state.authenticated = True
     st.session_state.user_profile = profile
-    _save_session({
-        "token": token,
-        "username": u,
-        "profile": profile,
-        "logged_in_at": datetime.now().isoformat(),
-    })
     try:
-        st.query_params["session"] = token
+        st.query_params.clear()
     except Exception:
         pass
 
@@ -268,7 +197,7 @@ def _do_register(username: str, password: str, name: str, email: str) -> tuple:
 def render_auth_page():
     """Render the full-page login/signup interface."""
 
-    # Auth page styling
+    # Auth page styling with responsive layout
     st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Hind+Siliguri:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
@@ -337,6 +266,33 @@ def render_auth_page():
         margin-top: 2rem;
         line-height: 1.6;
         letter-spacing: 0.4px;
+    }
+
+    /* Mobile Responsive Overrides for Auth Page */
+    @media (max-width: 768px) {
+        .block-container {
+            padding: 0.5rem 0.6rem !important;
+        }
+        .auth-brand-header {
+            margin: 1.2rem auto 0.8rem !important;
+        }
+        .auth-brand-name {
+            font-size: 1.8rem !important;
+        }
+        .auth-brand-sub {
+            font-size: 0.65rem !important;
+            letter-spacing: 1.2px !important;
+        }
+        /* Make columns full width on phone */
+        [data-testid="column"]:nth-child(1),
+        [data-testid="column"]:nth-child(3) {
+            display: none !important;
+        }
+        [data-testid="column"]:nth-child(2) {
+            width: 100% !important;
+            flex: 1 1 100% !important;
+            max-width: 100% !important;
+        }
     }
     </style>
     """, unsafe_allow_html=True)

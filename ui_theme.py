@@ -191,10 +191,10 @@ button[data-testid="stSidebarCollapseButton"]:hover::after {
   color: #000000 !important;
 }
 
-/* Streamlit Sidebar Expand — Small Snail Button 🐌 Floating on Left Side */
-@keyframes snailPulse {
+/* Streamlit Sidebar Expand — Clean Gold Royal Menu Button */
+@keyframes menuPulse {
   0% { box-shadow: 0 4px 18px rgba(0,0,0,0.85), 0 0 10px rgba(212, 175, 55, 0.35); }
-  50% { box-shadow: 0 4px 22px rgba(0,0,0,0.95), 0 0 22px rgba(212, 175, 55, 0.65); transform: scale(1.04); }
+  50% { box-shadow: 0 4px 22px rgba(0,0,0,0.95), 0 0 20px rgba(212, 175, 55, 0.65); transform: scale(1.03); }
   100% { box-shadow: 0 4px 18px rgba(0,0,0,0.85), 0 0 10px rgba(212, 175, 55, 0.35); }
 }
 
@@ -209,18 +209,18 @@ div[data-testid="collapsedControl"] button {
   z-index: 999999 !important;
   background: radial-gradient(circle, #241c0e 0%, #0d0f14 100%) !important;
   border: 1.8px solid var(--gold-primary) !important;
-  border-radius: 50% !important;
+  border-radius: var(--radius) !important;
   color: var(--gold-light) !important;
-  width: 42px !important;
-  height: 42px !important;
-  min-width: 42px !important;
-  max-width: 42px !important;
+  width: 38px !important;
+  height: 38px !important;
+  min-width: 38px !important;
+  max-width: 38px !important;
   padding: 0 !important;
   align-items: center !important;
   justify-content: center !important;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
   cursor: pointer !important;
-  animation: snailPulse 3.5s infinite ease-in-out !important;
+  animation: menuPulse 4s infinite ease-in-out !important;
 }
 
 [data-testid="stExpandSidebarButton"] *,
@@ -232,8 +232,10 @@ div[data-testid="collapsedControl"] button * {
 [data-testid="stExpandSidebarButton"]::after,
 button[data-testid="stExpandSidebarButton"]::after,
 div[data-testid="collapsedControl"] button::after {
-  content: '🐌' !important;
-  font-size: 1.35rem !important;
+  content: '☰' !important;
+  font-size: 1.25rem !important;
+  font-weight: 700 !important;
+  color: var(--gold-light) !important;
   line-height: 1 !important;
   display: inline-block !important;
   filter: drop-shadow(0 0 4px rgba(212,175,55,0.6));
@@ -242,7 +244,7 @@ div[data-testid="collapsedControl"] button::after {
 [data-testid="stExpandSidebarButton"]:hover,
 button[data-testid="stExpandSidebarButton"]:hover,
 div[data-testid="collapsedControl"] button:hover {
-  transform: scale(1.2) rotate(-8deg) !important;
+  transform: scale(1.08) !important;
   border-color: var(--gold-light) !important;
   box-shadow: 0 6px 25px rgba(0,0,0,0.95), 0 0 25px rgba(212, 175, 55, 0.75) !important;
   background: radial-gradient(circle, #352814 0%, #161922 100%) !important;
@@ -1792,6 +1794,282 @@ section[data-testid="stSidebar"] .stButton > button:hover {
   align-items: center;
   gap: 6px;
   padding: 4px 2px;
+}
+
+/* ═══════════════════════════════════════
+   MOBILE NAVIGATION DRAWER & CONTROLS
+   ═══════════════════════════════════════ */
+@keyframes mobileDrawerSlide {
+  0% {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.mobile-menu-drawer {
+  background: radial-gradient(ellipse at 50% 0%, #171b24 0%, #090a0e 100%) !important;
+  border: 1.5px solid var(--gold-primary) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: 0 16px 50px rgba(0,0,0,0.92), 0 0 30px rgba(212, 175, 55, 0.22) !important;
+  padding: 1rem 0.9rem !important;
+  margin-bottom: 1.2rem !important;
+  animation: mobileDrawerSlide 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  position: relative !important;
+  z-index: 99999 !important;
+}
+
+.mobile-menu-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding-bottom: 0.6rem !important;
+  border-bottom: 1px solid var(--gold-border) !important;
+  margin-bottom: 0.8rem !important;
+}
+
+.mobile-menu-title {
+  font-family: var(--font-serif) !important;
+  font-size: 0.85rem !important;
+  font-weight: 800 !important;
+  color: var(--gold-light) !important;
+  letter-spacing: 1.5px !important;
+  text-transform: uppercase !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+.mobile-menu-badge {
+  font-family: var(--font-mono) !important;
+  font-size: 0.62rem !important;
+  color: var(--gold-primary) !important;
+  background: rgba(212, 175, 55, 0.12) !important;
+  border: 1px solid var(--gold-border) !important;
+  padding: 2px 7px !important;
+  border-radius: 3px !important;
+  letter-spacing: 0.5px !important;
+}
+
+.mobile-menu-hint {
+  font-size: 0.72rem !important;
+  color: var(--t-secondary) !important;
+  letter-spacing: 0.3px !important;
+  margin-bottom: 0.65rem !important;
+}
+
+.mobile-nav-active-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(212, 175, 55, 0.15);
+  border: 1px solid var(--gold-primary);
+  color: var(--gold-light);
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+/* ═══════════════════════════════════════
+   RESPONSIVE MEDIA QUERIES (MOBILE VIEW)
+   ═══════════════════════════════════════ */
+@media (max-width: 768px) {
+  /* Layout & Padding */
+  .block-container {
+    padding-top: 0.3rem !important;
+    padding-bottom: 1.8rem !important;
+    padding-left: 0.65rem !important;
+    padding-right: 0.65rem !important;
+  }
+
+  /* Sidebar behavior on mobile — overlay rather than pushing page */
+  section[data-testid="stSidebar"] {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    height: 100vh !important;
+    width: 82vw !important;
+    max-width: 310px !important;
+    min-width: 260px !important;
+    z-index: 9999999 !important;
+    box-shadow: 20px 0 60px rgba(0,0,0,0.98), 0 0 30px rgba(212, 175, 55, 0.4) !important;
+  }
+
+  /* Top Bar layout on mobile */
+  .top-bar-location {
+    font-size: 0.72rem !important;
+    padding: 0.3rem 0.5rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .user-greeting-block {
+    display: none !important;
+  }
+
+  .top-bar-avatar {
+    width: 28px !important;
+    height: 28px !important;
+    font-size: 0.75rem !important;
+  }
+
+  /* Hero Banner mobile adaptation */
+  .hero-banner {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 1rem !important;
+    padding: 1.1rem 0.9rem !important;
+  }
+
+  .hero-title-bn {
+    font-size: 2rem !important;
+    letter-spacing: 0.5px !important;
+  }
+
+  .hero-subtitle {
+    font-size: 0.62rem !important;
+    letter-spacing: 1.4px !important;
+  }
+
+  .hero-tagline-row {
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+    font-size: 0.58rem !important;
+  }
+
+  .hero-weather-box {
+    width: 100% !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    margin-top: 0.4rem !important;
+  }
+
+  .hero-weather-temp {
+    font-size: 1.5rem !important;
+  }
+
+  .hero-datetime {
+    font-size: 0.65rem !important;
+    margin-top: 4px !important;
+  }
+
+  /* Featured Story Card mobile adaptation */
+  .featured-story {
+    flex-direction: column !important;
+    border-radius: var(--radius) !important;
+  }
+
+  .featured-img {
+    width: 100% !important;
+    min-height: 140px !important;
+    max-height: 170px !important;
+  }
+
+  .featured-body {
+    padding: 0.85rem !important;
+  }
+
+  .featured-headline {
+    font-size: 1.08rem !important;
+    line-height: 1.35 !important;
+  }
+
+  .featured-summary {
+    font-size: 0.8rem !important;
+    line-height: 1.45 !important;
+    max-height: 4.8em !important;
+  }
+
+  /* Story Rows mobile adaptation */
+  .story-row {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 0.7rem 0.65rem !important;
+  }
+
+  .story-content {
+    width: calc(100% - 50px) !important;
+  }
+
+  .story-title {
+    font-size: 0.88rem !important;
+  }
+
+  .story-excerpt {
+    font-size: 0.76rem !important;
+  }
+
+  .story-meta-right {
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    border-top: 1px dashed var(--gold-border-subtle) !important;
+    padding-top: 5px !important;
+    margin-top: 3px !important;
+  }
+
+  .relevance-box {
+    align-self: flex-start !important;
+  }
+
+  /* News Card Grid mobile */
+  .news-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.85rem !important;
+  }
+
+  .news-card {
+    min-height: auto !important;
+    padding: 0.85rem !important;
+  }
+
+  .news-card-title {
+    font-size: 0.95rem !important;
+  }
+
+  /* Tabs horizontal scrolling */
+  div[data-baseweb="tab-list"] {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    flex-wrap: nowrap !important;
+    gap: 4px !important;
+  }
+
+  button[data-baseweb="tab"] {
+    padding: 5px 9px !important;
+    font-size: 0.72rem !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Stats Grid */
+  .stats-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 0.5rem !important;
+  }
+
+  /* Section header on mobile */
+  .section-hdr {
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+  }
+
+  .section-hdr-title {
+    font-size: 0.82rem !important;
+  }
+
+  .view-all-link {
+    font-size: 0.65rem !important;
+  }
 }
 
 </style>

@@ -24,7 +24,7 @@ from langchain_core.documents import Document
 st.set_page_config(
     page_title="ত্রিকোণদৃষ্টি · TrikonDrishti",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ── Local Module Imports ──
@@ -99,12 +99,12 @@ raw_name = (current_user.get("name") or "").strip()
 raw_username = (current_user.get("username") or "").strip().lower()
 raw_email = (current_user.get("email") or "").strip().lower()
 
-if raw_username in KNOWN_FULL_NAMES:
+if raw_name and raw_name.lower() != raw_username:
+    user_name = raw_name
+elif raw_username in KNOWN_FULL_NAMES:
     user_name = KNOWN_FULL_NAMES[raw_username]
 elif raw_email in KNOWN_FULL_NAMES:
     user_name = KNOWN_FULL_NAMES[raw_email]
-elif raw_name and raw_name.lower() != raw_username:
-    user_name = raw_name
 elif raw_username:
     user_name = raw_username.title()
 else:
@@ -152,6 +152,8 @@ if "active_category" not in st.session_state:
     st.session_state.active_category = "For You"
 if "side_panel_open" not in st.session_state:
     st.session_state.side_panel_open = True
+if "mobile_menu_open" not in st.session_state:
+    st.session_state.mobile_menu_open = False
 
 
 # ── Location Resolution ──
@@ -404,6 +406,7 @@ with st.sidebar:
         btn_label = f"◆  {label}" if is_active else f"   {label}"
         if st.button(btn_label, key=f"sb_nav_{key}", use_container_width=True):
             st.session_state.view = key
+            st.session_state.mobile_menu_open = False
             components.html("""
             <script>
             const collapseBtn = window.parent.document.querySelector('[data-testid="stSidebarCollapseButton"] button')
@@ -471,23 +474,13 @@ if st.session_state.gps_requested:
 #  TOP BAR: Search + Location + User Avatar + Menu Controls
 # ═══════════════════════════════════════════════════════════════
 
-top_c0, top_c1, top_c2, top_c3, top_c4 = st.columns([0.85, 3.55, 1.45, 1.85, 0.65])
+top_c0, top_c1, top_c2, top_c3, top_c4 = st.columns([1.1, 3.4, 1.4, 1.8, 0.85])
 
 with top_c0:
-    if st.button("🐌 Menu", key="top_toggle_sidebar_btn", help="Open navigation menu"):
-        components.html("""
-        <script>
-        const expandBtn = window.parent.document.querySelector('[data-testid="stExpandSidebarButton"] button')
-          || window.parent.document.querySelector('[data-testid="stExpandSidebarButton"]')
-          || window.parent.document.querySelector('button[data-testid="stExpandSidebarButton"]')
-          || window.parent.document.querySelector('div[data-testid="collapsedControl"] button');
-        const collapseBtn = window.parent.document.querySelector('[data-testid="stSidebarCollapseButton"] button')
-          || window.parent.document.querySelector('button[data-testid="stSidebarCollapseButton"]')
-          || window.parent.document.querySelector('[data-testid="stSidebarCollapseButton"]');
-        if (expandBtn) { expandBtn.click(); }
-        else if (collapseBtn) { collapseBtn.click(); }
-        </script>
-        """, height=0)
+    menu_icon = "✕ Close" if st.session_state.get("mobile_menu_open", False) else "☰ Menu"
+    if st.button(menu_icon, key="top_toggle_sidebar_btn", help="Open / close navigation menu", use_container_width=True):
+        st.session_state.mobile_menu_open = not st.session_state.get("mobile_menu_open", False)
+        st.rerun()
 
 with top_c1:
     user_search_input = st.text_input(
@@ -518,7 +511,7 @@ with top_c3:
     ''', unsafe_allow_html=True)
 
 with top_c4:
-    if st.button("Sign Out", key="top_sign_out", help="Sign out of current session"):
+    if st.button("Sign Out", key="top_sign_out", help="Sign out of current session", use_container_width=True):
         logout()
 
 
@@ -526,7 +519,67 @@ with top_c4:
 if user_search_input.strip() and user_search_input.strip() != st.session_state.search_query:
     st.session_state.search_query = user_search_input.strip()
     st.session_state.view = "search"
+    st.session_state.mobile_menu_open = False
     st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  MOBILE NAVIGATION MENU (Appears on click, disappears on select)
+# ═══════════════════════════════════════════════════════════════
+
+if st.session_state.get("mobile_menu_open", False):
+    st.markdown(f'''
+    <div class="mobile-menu-drawer">
+      <div class="mobile-menu-header">
+        <div class="mobile-menu-title">
+          <span>NAVIGATION & OPTIONS</span>
+          <span class="mobile-menu-badge">{st.session_state.view.upper()}</span>
+        </div>
+        <div class="mobile-nav-active-pill">✦ ACTIVE: {st.session_state.view.upper()}</div>
+      </div>
+      <div class="mobile-menu-hint">Select a section below. The menu will automatically close upon selection.</div>
+    </div>
+    ''', unsafe_allow_html=True)
+
+    m_col1, m_col2 = st.columns(2)
+    nav_items = [
+        ("Home", "home"),
+        ("Global News", "discover"),
+        ("Local News", "local"),
+        ("Categories", "categories"),
+        ("Saved Articles", "saved"),
+        ("Search & AI", "search"),
+        ("Settings", "settings"),
+    ]
+
+    for idx, (label, key) in enumerate(nav_items):
+        target_col = m_col1 if (idx % 2 == 0) else m_col2
+        with target_col:
+            is_active = (st.session_state.view == key)
+            btn_label = f"◆  {label}" if is_active else f"   {label}"
+            if st.button(btn_label, key=f"mob_nav_{key}", use_container_width=True):
+                st.session_state.view = key
+                st.session_state.mobile_menu_open = False  # Disappears immediately upon selection!
+                st.rerun()
+
+    st.markdown("<div style='margin-top:0.4rem;border-top:1px solid rgba(212,175,55,0.2);padding-top:0.4rem;'></div>", unsafe_allow_html=True)
+    q_col1, q_col2, q_col3 = st.columns([1, 1, 1])
+    with q_col1:
+        if st.button("📍 GPS", key="mob_gps_btn", use_container_width=True, help="Update location via GPS"):
+            st.session_state.gps_requested = True
+            st.session_state.mobile_menu_open = False
+            st.rerun()
+    with q_col2:
+        if st.button("🔄 Sync", key="mob_sync_btn", use_container_width=True, help="Refresh news feeds"):
+            clear_cache()
+            st.session_state.cached_views.clear()
+            st.session_state.mobile_menu_open = False
+            st.toast("Feed synchronized.")
+            st.rerun()
+    with q_col3:
+        if st.button("✕ Close", key="mob_dismiss_btn", use_container_width=True, help="Close menu"):
+            st.session_state.mobile_menu_open = False
+            st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════
