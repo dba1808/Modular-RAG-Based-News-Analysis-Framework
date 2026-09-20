@@ -71,7 +71,7 @@ from utils import (
     truncate_text,
 )
 from ui_theme import get_full_css, get_geo_script_html
-from auth import is_authenticated, get_current_user, logout, render_auth_page, get_time_greeting
+from auth import is_authenticated, get_current_user, logout, render_auth_page, get_time_greeting, get_user_now
 
 logger = logging.getLogger("news_rag.app")
 
@@ -85,8 +85,31 @@ if not is_authenticated():
     st.stop()
 
 current_user = get_current_user()
-# Always use the user's Full Name, NOT username
-user_name = current_user.get("name") or current_user.get("username", "Reader")
+
+# Known user full-name mapping for accounts registered without explicit full name
+KNOWN_FULL_NAMES = {
+    "dba1808": "Debayudh Bhattacharya",
+    "bhattacharyadebayudh13@gmail.com": "Debayudh Bhattacharya",
+    "debayudh": "Debayudh Bhattacharya",
+    "debayudh_test": "Debayudh Bhattacharya",
+    "admin": "Admin",
+}
+
+raw_name = (current_user.get("name") or "").strip()
+raw_username = (current_user.get("username") or "").strip().lower()
+raw_email = (current_user.get("email") or "").strip().lower()
+
+if raw_username in KNOWN_FULL_NAMES:
+    user_name = KNOWN_FULL_NAMES[raw_username]
+elif raw_email in KNOWN_FULL_NAMES:
+    user_name = KNOWN_FULL_NAMES[raw_email]
+elif raw_name and raw_name.lower() != raw_username:
+    user_name = raw_name
+elif raw_username:
+    user_name = raw_username.title()
+else:
+    user_name = "Reader"
+
 user_initial = user_name[0].upper() if user_name else "R"
 time_greeting = get_time_greeting()
 
@@ -514,7 +537,7 @@ def render_hero_banner():
     """Render the main hero banner with branding, animated weather atmosphere, and dynamic personal greeting."""
     city = loc.get("city", "Kolkata")
     weather = fetch_weather(city)
-    now = datetime.now()
+    now = get_user_now()
 
     cond = str(weather.get("condition", "Clear")).lower()
     temp_raw = str(weather.get("temp_c", "28"))

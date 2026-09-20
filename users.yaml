@@ -8,7 +8,7 @@ users:
   dba1808:
     email: bhattacharyadebayudh13@gmail.com
     joined: '2026-09-20T11:53:04.268906'
-    name: dba1808
+    name: Debayudh Bhattacharya
     password: $2b$12$LpcvVIOVX0SmXp9IFOmOMu01ojA9NndeUGRDjkRiUBWNPLIxp61Tm
     role: reader
   debayudh:

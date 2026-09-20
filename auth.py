@@ -105,8 +105,20 @@ def is_authenticated() -> bool:
 
 
 def get_current_user() -> dict:
-    """Return the current logged-in user's profile."""
-    return st.session_state.get("user_profile", {})
+    """Return the current logged-in user's profile, kept in sync with users.yaml."""
+    profile = st.session_state.get("user_profile", {})
+    if profile and profile.get("username"):
+        u = profile.get("username")
+        try:
+            users = _load_users().get("users", {})
+            if u in users:
+                name_in_file = users[u].get("name")
+                if name_in_file and name_in_file != profile.get("name"):
+                    profile["name"] = name_in_file
+                    st.session_state.user_profile = profile
+        except Exception:
+            pass
+    return profile
 
 
 def logout():
@@ -129,7 +141,7 @@ def _do_login(username: str, password: str) -> bool:
     if user and _verify_password(password, user.get("password", "")):
         profile = {
             "username": username,
-            "name": user.get("name", username),
+            "name": user.get("name") or username,
             "email": user.get("email", ""),
             "role": user.get("role", "reader"),
             "joined": user.get("joined", ""),
@@ -154,9 +166,43 @@ def _do_login(username: str, password: str) -> bool:
     return False
 
 
+def get_user_now() -> datetime:
+    """
+    Return timezone-aware current datetime based on the client browser context,
+    defaulting gracefully to Indian Standard Time (Asia/Kolkata, UTC+5:30).
+    Works reliably on Streamlit Cloud (where the server host runs in UTC) and local environments.
+    """
+    # 1. Try browser timezone from st.context
+    try:
+        tz_name = getattr(st.context, "timezone", None)
+        if tz_name:
+            import zoneinfo
+            return datetime.now(zoneinfo.ZoneInfo(tz_name))
+    except Exception:
+        pass
+
+    # 2. Try browser timezone offset (in minutes from UTC)
+    try:
+        tz_offset = getattr(st.context, "timezone_offset", None)
+        if tz_offset is not None:
+            from datetime import timezone, timedelta
+            return datetime.now(timezone(timedelta(minutes=-tz_offset)))
+    except Exception:
+        pass
+
+    # 3. Default to Indian Standard Time (IST, UTC+5:30)
+    try:
+        import zoneinfo
+        return datetime.now(zoneinfo.ZoneInfo("Asia/Kolkata"))
+    except Exception:
+        from datetime import timezone, timedelta
+        return datetime.now(timezone(timedelta(hours=5, minutes=30)))
+
+
 def get_time_greeting() -> str:
-    """Return an elegant, time-of-day greeting (e.g., 'Good morning', 'Good afternoon', 'Good evening')."""
-    h = datetime.now().hour
+    """Return an elegant, time-of-day greeting adjusted to the user's local timezone."""
+    now = get_user_now()
+    h = now.hour
     if 5 <= h < 12:
         return "Good morning"
     elif 12 <= h < 17:

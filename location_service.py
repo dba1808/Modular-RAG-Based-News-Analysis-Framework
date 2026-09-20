@@ -79,51 +79,146 @@ from pathlib import Path
 
 LOC_CACHE_FILE = Path(__file__).parent / "last_location.json"
 
+# Known cloud hosting / datacenter cities to reject so server hosting locations are never misattributed to users
+DATACENTER_LOCATIONS = {
+    "the dalles", "council bluffs", "ashburn", "boardman", "boydton",
+    "north charleston", "quincy", "moncks corner", "des moines",
+    "mountain view", "omaha", "kansas city", "seattle", "dublin",
+    "frankfurt", "zurich", "san jose", "prineville", "reston",
+    "sterling", "herndon", "leesburg", "forest city", "columbus", "new albany"
+}
+
+
+def _is_cloud_datacenter(city: str, country: str = "") -> bool:
+    """Return True if detected location is a cloud server hosting location (e.g., Streamlit Cloud GCP in The Dalles)."""
+    c = (city or "").strip().lower()
+    co = (country or "").strip().lower()
+    if not c or c == "unknown":
+        return True
+    if c in DATACENTER_LOCATIONS:
+        return True
+    if any(k in c for k in ("datacenter", "hosting", "cloud", "aws", "gcp", "azure", "server")):
+        return True
+    if co in ("united states", "us", "usa") and c in DATACENTER_LOCATIONS:
+        return True
+    return False
+
+
+def _is_valid_public_ip(ip: str) -> bool:
+    if not ip or not isinstance(ip, str):
+        return False
+    ip = ip.strip()
+    if ip.startswith((
+        "127.", "10.", "192.168.", "172.16.", "172.17.", "172.18.",
+        "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
+        "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.",
+        "172.31.", "fc00:", "fe80:", "::1"
+    )):
+        return False
+    return True
+
+
+def _extract_client_ip() -> Optional[str]:
+    """Extract real client IP from Streamlit context or request headers."""
+    try:
+        import streamlit as st
+        # 1. Direct ip_address in st.context
+        ip = getattr(st.context, "ip_address", None)
+        if ip and _is_valid_public_ip(ip):
+            return ip.strip()
+
+        # 2. Check headers
+        headers = getattr(st.context, "headers", None) or {}
+        for h in ("cf-connecting-ip", "x-real-ip", "x-forwarded-for"):
+            val = headers.get(h)
+            if val:
+                first = val.split(",")[0].strip()
+                if _is_valid_public_ip(first):
+                    return first
+    except Exception:
+        pass
+    return None
+
+
+def _try_cloudflare_headers() -> Optional[Dict[str, str]]:
+    """Try reading geolocation directly from Cloudflare headers provided by Streamlit Cloud."""
+    try:
+        import streamlit as st
+        headers = getattr(st.context, "headers", None) or {}
+        city = headers.get("cf-ipcity")
+        country = headers.get("cf-ipcountry")
+        region = headers.get("cf-region") or headers.get("cf-region-code") or ""
+        if city and not _is_cloud_datacenter(city, country or ""):
+            return {
+                "city": city,
+                "region": region or "West Bengal",
+                "country": "India" if country == "IN" else (country or "India"),
+                "country_code": (country or "IN").upper(),
+                "source": "network_detected",
+            }
+    except Exception:
+        pass
+    return None
+
 
 def detect_location(force_refresh: bool = False) -> Dict[str, str]:
     """
-    Auto-detect location using free IP geolocation when browser GPS is denied/unavailable.
+    Auto-detect location using client IP and geolocation when browser GPS is denied/unavailable.
+    Guarantees cloud datacenter hosting locations (like The Dalles, US) are rejected.
     Returns: {"city", "region", "country", "country_code", "source": "ip_fallback"}
     """
     global _ip_location_cache
     if not force_refresh and _ip_location_cache is not None:
-        return _ip_location_cache
+        if not _is_cloud_datacenter(_ip_location_cache.get("city", ""), _ip_location_cache.get("country", "")):
+            return _ip_location_cache
 
-    # Check disk cache first for instantaneous startup
+    # 1. Check Cloudflare reverse-proxy headers (available on Streamlit Cloud)
+    cf_loc = _try_cloudflare_headers()
+    if cf_loc:
+        _ip_location_cache = cf_loc
+        return cf_loc
+
+    # 2. Check disk cache if valid and not a datacenter
     if not force_refresh and LOC_CACHE_FILE.exists():
         try:
             with open(LOC_CACHE_FILE, "r", encoding="utf-8") as f:
                 cached = json.load(f)
-                if cached.get("city"):
+                if cached.get("city") and not _is_cloud_datacenter(cached.get("city"), cached.get("country", "")):
                     _ip_location_cache = cached
                     return cached
         except Exception:
             pass
 
+    # 3. Detect client IP from Streamlit context
+    client_ip = _extract_client_ip()
+
     services = [
-        _try_ipapi,
-        _try_ipinfo,
-        _try_ipwhois,
+        lambda: _try_ipapi(client_ip),
+        lambda: _try_ipinfo(client_ip),
+        lambda: _try_ipwhois(client_ip),
     ]
 
     for service in services:
         try:
             result = service()
             if result and result.get("city") and result.get("city").lower() != "unknown":
-                result["source"] = "ip_fallback"
-                _ip_location_cache = result
-                try:
-                    with open(LOC_CACHE_FILE, "w", encoding="utf-8") as f:
-                        json.dump(result, f, indent=2)
-                except Exception:
-                    pass
-                logger.info(f"IP Geolocation detected: {result.get('city')}, {result.get('region')}, {result.get('country')}")
-                return result
+                if not _is_cloud_datacenter(result.get("city"), result.get("country", "")):
+                    result["source"] = "ip_fallback"
+                    _ip_location_cache = result
+                    try:
+                        with open(LOC_CACHE_FILE, "w", encoding="utf-8") as f:
+                            json.dump(result, f, indent=2)
+                    except Exception:
+                        pass
+                    logger.info(f"IP Geolocation detected: {result.get('city')}, {result.get('region')}, {result.get('country')}")
+                    return result
+                else:
+                    logger.warning(f"Rejected cloud datacenter location: {result.get('city')}, {result.get('country')}")
         except Exception as e:
             logger.debug(f"IP service failed: {e}")
             continue
 
-    # Default fallback
+    # Default fallback — always clean, authentic Indian regional intelligence
     default = {
         "city": "Kolkata",
         "region": "West Bengal",
@@ -140,9 +235,9 @@ def detect_location(force_refresh: bool = False) -> Dict[str, str]:
     return default
 
 
-
-def _try_ipapi() -> Optional[Dict[str, str]]:
-    resp = requests.get("http://ip-api.com/json/", timeout=4)
+def _try_ipapi(client_ip: Optional[str] = None) -> Optional[Dict[str, str]]:
+    url = f"http://ip-api.com/json/{client_ip}" if client_ip else "http://ip-api.com/json/"
+    resp = requests.get(url, timeout=4)
     data = resp.json()
     if data.get("status") == "success":
         return {
@@ -154,8 +249,9 @@ def _try_ipapi() -> Optional[Dict[str, str]]:
     return None
 
 
-def _try_ipinfo() -> Optional[Dict[str, str]]:
-    resp = requests.get("https://ipinfo.io/json", timeout=4)
+def _try_ipinfo(client_ip: Optional[str] = None) -> Optional[Dict[str, str]]:
+    url = f"https://ipinfo.io/{client_ip}/json" if client_ip else "https://ipinfo.io/json"
+    resp = requests.get(url, timeout=4)
     data = resp.json()
     return {
         "city": data.get("city", ""),
@@ -165,8 +261,9 @@ def _try_ipinfo() -> Optional[Dict[str, str]]:
     }
 
 
-def _try_ipwhois() -> Optional[Dict[str, str]]:
-    resp = requests.get("https://ipwhois.app/json/", timeout=4)
+def _try_ipwhois(client_ip: Optional[str] = None) -> Optional[Dict[str, str]]:
+    url = f"https://ipwhois.app/json/{client_ip}" if client_ip else "https://ipwhois.app/json/"
+    resp = requests.get(url, timeout=4)
     data = resp.json()
     return {
         "city": data.get("city", ""),
