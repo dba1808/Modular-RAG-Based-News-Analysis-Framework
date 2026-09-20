@@ -1,0 +1,25 @@
+users:
+  admin:
+    email: admin@trikondrishti.in
+    joined: '2026-09-20T00:00:00'
+    name: Admin
+    password: $2b$12$tC9Ljqnwu7Zb5e12nwOeTe6D.LeSPbQ/GLawwpVlpEAk4fIstyilC
+    role: admin
+  dba1808:
+    email: bhattacharyadebayudh13@gmail.com
+    joined: '2026-09-20T11:53:04.268906'
+    name: dba1808
+    password: $2b$12$LpcvVIOVX0SmXp9IFOmOMu01ojA9NndeUGRDjkRiUBWNPLIxp61Tm
+    role: reader
+  debayudh:
+    email: debayudh@example.com
+    joined: '2026-09-20T00:00:00'
+    name: Debayudh
+    password: $2b$12$tC9Ljqnwu7Zb5e12nwOeTe6D.LeSPbQ/GLawwpVlpEAk4fIstyilC
+    role: reader
+  debayudh_test:
+    email: debayudh@trikondrishti.in
+    joined: '2026-09-20T12:21:06.613874'
+    name: Debayudh Bhattacharya
+    password: $2b$12$F7fe9eqgoKhQsLf81fzrO..Ymt6QaRd5wBcVrAqd6wHM/ll8n3a.y
+    role: reader

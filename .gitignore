@@ -16,3 +16,9 @@ __pycache__/
 
 # Streamlit cache
 .streamlit/
+
+# Local session and cache data
+active_session.json
+last_location.json
+chat_history.json
+.vscode/
