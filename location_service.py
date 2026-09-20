@@ -167,27 +167,10 @@ def detect_location(force_refresh: bool = False) -> Dict[str, str]:
     Guarantees cloud datacenter hosting locations (like The Dalles, US) are rejected.
     Returns: {"city", "region", "country", "country_code", "source": "ip_fallback"}
     """
-    global _ip_location_cache
-    if not force_refresh and _ip_location_cache is not None:
-        if not _is_cloud_datacenter(_ip_location_cache.get("city", ""), _ip_location_cache.get("country", "")):
-            return _ip_location_cache
-
     # 1. Check Cloudflare reverse-proxy headers (available on Streamlit Cloud)
     cf_loc = _try_cloudflare_headers()
     if cf_loc:
-        _ip_location_cache = cf_loc
         return cf_loc
-
-    # 2. Check disk cache if valid and not a datacenter
-    if not force_refresh and LOC_CACHE_FILE.exists():
-        try:
-            with open(LOC_CACHE_FILE, "r", encoding="utf-8") as f:
-                cached = json.load(f)
-                if cached.get("city") and not _is_cloud_datacenter(cached.get("city"), cached.get("country", "")):
-                    _ip_location_cache = cached
-                    return cached
-        except Exception:
-            pass
 
     # 3. Detect client IP from Streamlit context
     client_ip = _extract_client_ip()
@@ -204,12 +187,6 @@ def detect_location(force_refresh: bool = False) -> Dict[str, str]:
             if result and result.get("city") and result.get("city").lower() != "unknown":
                 if not _is_cloud_datacenter(result.get("city"), result.get("country", "")):
                     result["source"] = "ip_fallback"
-                    _ip_location_cache = result
-                    try:
-                        with open(LOC_CACHE_FILE, "w", encoding="utf-8") as f:
-                            json.dump(result, f, indent=2)
-                    except Exception:
-                        pass
                     logger.info(f"IP Geolocation detected: {result.get('city')}, {result.get('region')}, {result.get('country')}")
                     return result
                 else:
@@ -226,12 +203,6 @@ def detect_location(force_refresh: bool = False) -> Dict[str, str]:
         "country_code": "IN",
         "source": "default",
     }
-    _ip_location_cache = default
-    try:
-        with open(LOC_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(default, f, indent=2)
-    except Exception:
-        pass
     return default
 
 

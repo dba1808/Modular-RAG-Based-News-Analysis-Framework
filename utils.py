@@ -5,9 +5,11 @@ Utility functions for the News Intelligence Platform.
 import time
 import logging
 import json
+import re
 from functools import wraps
 from datetime import datetime
 from pathlib import Path
+from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger("news_rag.utils")
 
@@ -42,33 +44,57 @@ def truncate_text(text: str, max_length: int = 200) -> str:
     return text[:max_length].rsplit(" ", 1)[0] + "…"
 
 
+# ─── Per-User Storage Helpers ──────────────────────────────
+USER_DATA_DIR = Path(__file__).parent / "user_data"
+
+
+def _get_user_storage_dir(username: Optional[str] = None) -> Path:
+    """Return user-isolated directory for state storage (bookmarks, chats)."""
+    if not username:
+        try:
+            import streamlit as st
+            username = st.session_state.get("user_profile", {}).get("username")
+        except Exception:
+            pass
+    safe_user = re.sub(r"[^a-zA-Z0-9_-]", "_", str(username or "guest").lower())
+    p = USER_DATA_DIR / safe_user
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 # ─── Bookmarks persistence ─────────────────────────────────
-BOOKMARKS_FILE = "bookmarks.json"
-
-
-def load_bookmarks() -> list:
-    """Load bookmarks from file."""
+def load_bookmarks(username: Optional[str] = None) -> list:
+    """Load bookmarks isolated to the given or active user."""
+    b_file = _get_user_storage_dir(username) / "bookmarks.json"
     try:
-        if Path(BOOKMARKS_FILE).exists():
-            with open(BOOKMARKS_FILE, "r") as f:
+        if b_file.exists():
+            with open(b_file, "r", encoding="utf-8") as f:
                 return json.load(f)
+        # Migrate from legacy single-user file if available and user is default
+        legacy = Path("bookmarks.json")
+        if legacy.exists() and (username in ("admin", "guest") or not username):
+            with open(legacy, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                save_bookmarks(data, username)
+                return data
     except Exception as e:
         logger.warning(f"Could not load bookmarks: {e}")
     return []
 
 
-def save_bookmarks(bookmarks: list):
-    """Save bookmarks to file."""
+def save_bookmarks(bookmarks: list, username: Optional[str] = None):
+    """Save bookmarks isolated to the given or active user."""
+    b_file = _get_user_storage_dir(username) / "bookmarks.json"
     try:
-        with open(BOOKMARKS_FILE, "w") as f:
-            json.dump(bookmarks, f, indent=2)
+        with open(b_file, "w", encoding="utf-8") as f:
+            json.dump(bookmarks, f, indent=2, ensure_ascii=False)
     except Exception as e:
         logger.error(f"Could not save bookmarks: {e}")
 
 
-def add_bookmark(title: str, url: str, source: str):
-    """Add a bookmark."""
-    bookmarks = load_bookmarks()
+def add_bookmark(title: str, url: str, source: str, username: Optional[str] = None) -> bool:
+    """Add a bookmark for the given or active user."""
+    bookmarks = load_bookmarks(username)
     # Avoid duplicates
     if not any(b.get("url") == url for b in bookmarks):
         bookmarks.insert(0, {
@@ -77,38 +103,37 @@ def add_bookmark(title: str, url: str, source: str):
             "source": source,
             "saved_at": datetime.now().isoformat(),
         })
-        save_bookmarks(bookmarks)
+        save_bookmarks(bookmarks, username)
         return True
     return False
 
 
-def remove_bookmark(url: str):
-    """Remove a bookmark by URL."""
-    bookmarks = load_bookmarks()
+def remove_bookmark(url: str, username: Optional[str] = None):
+    """Remove a bookmark by URL for the given or active user."""
+    bookmarks = load_bookmarks(username)
     bookmarks = [b for b in bookmarks if b.get("url") != url]
-    save_bookmarks(bookmarks)
+    save_bookmarks(bookmarks, username)
 
 
 # ─── Conversation history persistence ──────────────────────
-HISTORY_FILE = "chat_history.json"
-
-
-def load_chat_history() -> list:
-    """Load conversation history from file."""
+def load_chat_history(username: Optional[str] = None) -> list:
+    """Load conversation history isolated to the given or active user."""
+    h_file = _get_user_storage_dir(username) / "chat_history.json"
     try:
-        if Path(HISTORY_FILE).exists():
-            with open(HISTORY_FILE, "r") as f:
+        if h_file.exists():
+            with open(h_file, "r", encoding="utf-8") as f:
                 return json.load(f)
     except Exception as e:
         logger.warning(f"Could not load chat history: {e}")
     return []
 
 
-def save_chat_history(chats: list):
-    """Save conversation history to file."""
+def save_chat_history(chats: list, username: Optional[str] = None):
+    """Save conversation history isolated to the given or active user."""
+    h_file = _get_user_storage_dir(username) / "chat_history.json"
     try:
         # Keep only last 50 conversations
-        with open(HISTORY_FILE, "w") as f:
-            json.dump(chats[:50], f, indent=2, default=str)
+        with open(h_file, "w", encoding="utf-8") as f:
+            json.dump(chats[:50], f, indent=2, default=str, ensure_ascii=False)
     except Exception as e:
         logger.error(f"Could not save chat history: {e}")

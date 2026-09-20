@@ -21,4 +21,6 @@ __pycache__/
 active_session.json
 last_location.json
 chat_history.json
+bookmarks.json
+user_data/
 .vscode/

@@ -54,6 +54,8 @@ from intelligence import (
     detect_contradictions,
     generate_daily_briefing,
     check_news_alerts,
+    extract_evidence_trail,
+    detect_story_drift,
 )
 from location_service import (
     detect_location,
@@ -71,7 +73,7 @@ from utils import (
     truncate_text,
 )
 from ui_theme import get_full_css, get_geo_script_html
-from auth import is_authenticated, get_current_user, logout, render_auth_page, get_time_greeting, get_user_now
+from auth import is_authenticated, get_current_user, logout, render_auth_page, get_time_greeting, get_user_now, sync_auth_cookie
 
 logger = logging.getLogger("news_rag.app")
 
@@ -85,6 +87,7 @@ if not is_authenticated():
     st.stop()
 
 current_user = get_current_user()
+sync_auth_cookie(current_user.get("username", ""))
 
 # Known user full-name mapping for accounts registered without explicit full name
 KNOWN_FULL_NAMES = {
@@ -130,14 +133,18 @@ if "view" not in st.session_state:
     st.session_state.view = "home"
 if "display_mode" not in st.session_state:
     st.session_state.display_mode = "cards"
+if "active_username" not in st.session_state or st.session_state.active_username != raw_username:
+    st.session_state.active_username = raw_username
+    st.session_state.bookmarks = load_bookmarks(raw_username)
+    st.session_state.chats = load_chat_history(raw_username) or []
 if "bookmarks" not in st.session_state:
-    st.session_state.bookmarks = load_bookmarks()
+    st.session_state.bookmarks = load_bookmarks(raw_username)
 if "user_location" not in st.session_state:
     st.session_state.user_location = None
 if "gps_requested" not in st.session_state:
     st.session_state.gps_requested = False
 if "chats" not in st.session_state:
-    st.session_state.chats = load_chat_history() or []
+    st.session_state.chats = load_chat_history(raw_username) or []
 if "active_chat" not in st.session_state:
     st.session_state.active_chat = None
 if "selected_model" not in st.session_state:
@@ -154,6 +161,8 @@ if "side_panel_open" not in st.session_state:
     st.session_state.side_panel_open = True
 if "mobile_menu_open" not in st.session_state:
     st.session_state.mobile_menu_open = False
+if "mobile_sheet_open" not in st.session_state:
+    st.session_state.mobile_sheet_open = False
 
 
 # ── Location Resolution ──
@@ -356,230 +365,96 @@ def _get_cat_badge_class(category: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
-#  SIDEBAR NAVIGATION
+#  TOP HEADER & PRIMARY NAVIGATION (UNIFIED RESPONSIVE SYSTEM)
 # ═══════════════════════════════════════════════════════════════
 
-with st.sidebar:
-    sb_t1, sb_t2 = st.columns([3.5, 0.8])
-    with sb_t1:
-        st.markdown('<div class="sb-book-header-label">MENU</div>', unsafe_allow_html=True)
-    with sb_t2:
-        if st.button("✕", key="sb_close_menu_btn", help="Close menu"):
-            components.html("""
-            <script>
-            const btn = window.parent.document.querySelector('[data-testid="stSidebarCollapseButton"] button')
-              || window.parent.document.querySelector('button[data-testid="stSidebarCollapseButton"]')
-              || window.parent.document.querySelector('[data-testid="stSidebarCollapseButton"]');
-            if (btn) { btn.click(); }
-            </script>
-            """, height=0)
-
-    st.markdown(f'''
-    <div class="sb-brand">
-      <div class="sb-brand-icon">TD</div>
-      <span class="sb-brand-bn">{APP_NAME_BN}</span>
-      <div class="sb-savage-tagline">RAW TRUTH. ZERO SPIN. WE DISSECT THE NOISE.</div>
-    </div>
-    ''', unsafe_allow_html=True)
-
-    # Box 1: Navigation
-    st.markdown('''
-    <div class="sb-box">
-      <div class="sb-box-title">
-        <span>NAVIGATION</span>
-      </div>
-    </div>
-    ''', unsafe_allow_html=True)
-
-    nav_options = [
-        ("Home", "home"),
-        ("Global News", "discover"),
-        ("Local News", "local"),
-        ("Categories", "categories"),
-        ("Saved Articles", "saved"),
-        ("Search & AI", "search"),
-        ("Settings", "settings"),
-    ]
-
-    for label, key in nav_options:
-        is_active = (st.session_state.view == key)
-        btn_label = f"◆  {label}" if is_active else f"   {label}"
-        if st.button(btn_label, key=f"sb_nav_{key}", use_container_width=True):
-            st.session_state.view = key
-            st.session_state.mobile_menu_open = False
-            components.html("""
-            <script>
-            const collapseBtn = window.parent.document.querySelector('[data-testid="stSidebarCollapseButton"] button')
-              || window.parent.document.querySelector('button[data-testid="stSidebarCollapseButton"]')
-              || window.parent.document.querySelector('[data-testid="stSidebarCollapseButton"]');
-            if (collapseBtn) { collapseBtn.click(); }
-            </script>
-            """, height=0)
-            st.rerun()
-
-    # Box 2: Location & Sync
-    st.markdown(f'''
-    <div class="sb-box" style="margin-top:0.6rem">
-      <div class="sb-box-title">
-        <span>LOCATION & SYNC</span>
-        <span class="sb-badge-pill">{loc.get("city", "Kolkata").upper()}</span>
-      </div>
-    </div>
-    ''', unsafe_allow_html=True)
-
-    col_gps, col_ref = st.columns([1, 1])
-    with col_gps:
-        if st.button("📍 GPS", help="Request browser geolocation", use_container_width=True):
-            st.session_state.gps_requested = True
-            st.rerun()
-    with col_ref:
-        if st.button("🔄 Sync", help="Clear cache and refresh feeds", use_container_width=True):
-            clear_cache()
-            st.session_state.cached_views.clear()
-            st.toast("Feed synchronized.")
-            st.rerun()
-
-    # Box 3: User Profile
-    st.markdown(f'''
-    <div class="sb-box" style="margin-top:0.6rem">
-      <div class="sb-box-title">
-        <span>ACCOUNT</span>
-        <span class="sb-badge-pill">ACTIVE</span>
-      </div>
-      <div class="sb-user-row">
-        <div class="sb-user-name">{user_name}</div>
-        <div class="sb-user-role">VERIFIED MEMBER</div>
-      </div>
-    </div>
-    ''', unsafe_allow_html=True)
-
-    if st.button("Sign Out", key="sb_signout_btn", use_container_width=True):
-        logout()
-
-    st.markdown('''
-    <div class="sb-footer-seal">
-      <span>TRIKONDRISHTI</span>
-      <span class="seal-sub">NEWS INTELLIGENCE PLATFORM</span>
-    </div>
-    ''', unsafe_allow_html=True)
-
-
-# ── Handle GPS Callback ──
+# Handle GPS Callback if triggered
 if st.session_state.gps_requested:
     geo_data = components.html(get_geo_script_html(), height=0, scrolling=False)
     st.session_state.gps_requested = False
 
+# Live bookmark counter badge
+saved_count = len(st.session_state.get("bookmarks", []))
+saved_badge = f" ({saved_count})" if saved_count > 0 else ""
 
-# ═══════════════════════════════════════════════════════════════
-#  TOP BAR: Search + Location + User Avatar + Menu Controls
-# ═══════════════════════════════════════════════════════════════
+# ── 1. TOP HEADER (Logo | Search | Profile & Controls) ──
+with st.container():
+    st.markdown('<div class="app-header-anchor"></div>', unsafe_allow_html=True)
+    hdr_c1, hdr_c2, hdr_c3 = st.columns([1.8, 3.6, 2.8], gap="small")
 
-top_c0, top_c1, top_c2, top_c3, top_c4 = st.columns([1.1, 3.4, 1.4, 1.8, 0.85])
+    with hdr_c1:
+        st.markdown(f'''
+        <div class="hdr-brand">
+          <div class="hdr-brand-icon">TD</div>
+          <div class="hdr-brand-info">
+            <span class="hdr-brand-title">{APP_NAME_BN}</span>
+            <span class="hdr-brand-sub">NEWS INTELLIGENCE</span>
+          </div>
+        </div>
+        ''', unsafe_allow_html=True)
 
-with top_c0:
-    menu_icon = "✕ Close" if st.session_state.get("mobile_menu_open", False) else "☰ Menu"
-    if st.button(menu_icon, key="top_toggle_sidebar_btn", help="Open / close navigation menu", use_container_width=True):
-        st.session_state.mobile_menu_open = not st.session_state.get("mobile_menu_open", False)
-        st.rerun()
+    with hdr_c2:
+        user_search_input = st.text_input(
+            "Global Search",
+            value=st.session_state.search_query,
+            placeholder="Search news, topics, keywords or ask AI...",
+            label_visibility="collapsed",
+            key="main_global_search",
+        )
 
-with top_c1:
-    user_search_input = st.text_input(
-        "Search",
-        value=st.session_state.search_query,
-        placeholder="Search news archive, topics, countries, or keywords...",
-        label_visibility="collapsed",
-        key="main_search_input",
-    )
+    with hdr_c3:
+        st.markdown('<div class="hdr-controls-anchor"></div>', unsafe_allow_html=True)
+        meta_c1, meta_c2, meta_c3 = st.columns([1.55, 0.45, 1.15], gap="small")
+        with meta_c1:
+            st.markdown(f'''
+            <div class="hdr-location-chip" title="Active Detected Region">
+              <span class="hdr-loc-pin">📍</span>
+              <span class="hdr-loc-text">{loc.get("city", "Kolkata")}, {loc.get("country", "India")}</span>
+            </div>
+            ''', unsafe_allow_html=True)
+        with meta_c2:
+            if st.button("🔄", key="hdr_sync_btn", help="Sync feeds & refresh cache", use_container_width=True):
+                clear_cache()
+                st.session_state.cached_views.clear()
+                st.toast("Feed synchronized.")
+                st.rerun()
+        with meta_c3:
+            if st.button("Sign Out", key="hdr_signout_btn", help=f"Signed in as {user_name} ({user_initial})", use_container_width=True):
+                logout()
 
-with top_c2:
-    st.markdown(f'''
-    <div class="top-bar-location">
-      <span style="font-size:0.85rem">📍</span>
-      <span>{loc.get("city", "Kolkata")}, {loc.get("country", "India")}</span>
-    </div>
-    ''', unsafe_allow_html=True)
-
-with top_c3:
-    st.markdown(f'''
-    <div class="top-bar-user" title="Active Intelligence Profile">
-      <div class="user-greeting-block">
-        <span class="user-greeting-time">{time_greeting},</span>
-        <span class="user-greeting-name">{user_name}</span>
-      </div>
-      <span class="top-bar-avatar">{user_initial}</span>
-    </div>
-    ''', unsafe_allow_html=True)
-
-with top_c4:
-    if st.button("Sign Out", key="top_sign_out", help="Sign out of current session", use_container_width=True):
-        logout()
-
-
-# Handle search
+# Route search if query changed
 if user_search_input.strip() and user_search_input.strip() != st.session_state.search_query:
     st.session_state.search_query = user_search_input.strip()
     st.session_state.view = "search"
-    st.session_state.mobile_menu_open = False
     st.rerun()
+# ── 2. UNIFIED RESPONSIVE PRIMARY NAVIGATION ──
+nav_tabs_data = [
+    ("HOME", "home", "🏠"),
+    ("GLOBAL NEWS", "discover", "🌐"),
+    ("LOCAL NEWS", "local", "📍"),
+    ("CATEGORIES", "categories", "📑"),
+    (f"SAVED{saved_badge}", "saved", "🔖"),
+    ("AI INTEL", "search", "⚡"),
+    ("SETTINGS", "settings", "⚙️"),
+]
+
+with st.container():
+    st.markdown('<div class="primary-nav-anchor"></div>', unsafe_allow_html=True)
+    nav_cols = st.columns(7, gap="small")
+    for idx, (tab_label, tab_key, tab_icon) in enumerate(nav_tabs_data):
+        with nav_cols[idx]:
+            is_active = (st.session_state.view == tab_key)
+            slot_class = "nav-btn-slot is-active" if is_active else "nav-btn-slot"
+            st.markdown(f'<div class="{slot_class}">', unsafe_allow_html=True)
+            btn_type = "primary" if is_active else "secondary"
+            btn_text = f"{tab_icon}  {tab_label}"
+            if st.button(btn_text, key=f"pnav_{tab_key}", use_container_width=True, type=btn_type):
+                if st.session_state.view != tab_key:
+                    st.session_state.view = tab_key
+                    st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
 
-# ═══════════════════════════════════════════════════════════════
-#  MOBILE NAVIGATION MENU (Appears on click, disappears on select)
-# ═══════════════════════════════════════════════════════════════
-
-if st.session_state.get("mobile_menu_open", False):
-    st.markdown(f'''
-    <div class="mobile-menu-drawer">
-      <div class="mobile-menu-header">
-        <div class="mobile-menu-title">
-          <span>NAVIGATION & OPTIONS</span>
-          <span class="mobile-menu-badge">{st.session_state.view.upper()}</span>
-        </div>
-        <div class="mobile-nav-active-pill">✦ ACTIVE: {st.session_state.view.upper()}</div>
-      </div>
-      <div class="mobile-menu-hint">Select a section below. The menu will automatically close upon selection.</div>
-    </div>
-    ''', unsafe_allow_html=True)
-
-    m_col1, m_col2 = st.columns(2)
-    nav_items = [
-        ("Home", "home"),
-        ("Global News", "discover"),
-        ("Local News", "local"),
-        ("Categories", "categories"),
-        ("Saved Articles", "saved"),
-        ("Search & AI", "search"),
-        ("Settings", "settings"),
-    ]
-
-    for idx, (label, key) in enumerate(nav_items):
-        target_col = m_col1 if (idx % 2 == 0) else m_col2
-        with target_col:
-            is_active = (st.session_state.view == key)
-            btn_label = f"◆  {label}" if is_active else f"   {label}"
-            if st.button(btn_label, key=f"mob_nav_{key}", use_container_width=True):
-                st.session_state.view = key
-                st.session_state.mobile_menu_open = False  # Disappears immediately upon selection!
-                st.rerun()
-
-    st.markdown("<div style='margin-top:0.4rem;border-top:1px solid rgba(212,175,55,0.2);padding-top:0.4rem;'></div>", unsafe_allow_html=True)
-    q_col1, q_col2, q_col3 = st.columns([1, 1, 1])
-    with q_col1:
-        if st.button("📍 GPS", key="mob_gps_btn", use_container_width=True, help="Update location via GPS"):
-            st.session_state.gps_requested = True
-            st.session_state.mobile_menu_open = False
-            st.rerun()
-    with q_col2:
-        if st.button("🔄 Sync", key="mob_sync_btn", use_container_width=True, help="Refresh news feeds"):
-            clear_cache()
-            st.session_state.cached_views.clear()
-            st.session_state.mobile_menu_open = False
-            st.toast("Feed synchronized.")
-            st.rerun()
-    with q_col3:
-        if st.button("✕ Close", key="mob_dismiss_btn", use_container_width=True, help="Close menu"):
-            st.session_state.mobile_menu_open = False
-            st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -602,7 +477,7 @@ def render_hero_banner():
     except Exception:
         temp_num = 28.0
 
-    # Determine dynamic weather atmosphere (compact HTML strings without 4+ leading spaces)
+    # Determine dynamic weather atmosphere
     if any(w in cond for w in ("rain", "drizzle", "shower", "thunder", "storm", "wet", "precipitation")):
         rain_drops = "".join(
             f'<div class="rain-drop" style="left:{i * 4.8}%;animation-delay:{((i * 137) % 80) / 100:.2f}s;animation-duration:{0.65 + ((i * 31) % 40) / 100:.2f}s"></div>'
@@ -623,11 +498,15 @@ def render_hero_banner():
     hero_html = (
         f'<div class="hero-banner">'
         f'{anim_html}'
-        f'<div class="hero-scope-badge">REGIONAL INTELLIGENCE</div>'
-        f'<div class="hero-content">'
-        f'<div class="hero-greeting-line"><span class="hero-greeting-dot">◆</span> {time_greeting}, <strong>{user_name}</strong> · AI Regional Dossier Active</div>'
+        f'<div class="hero-left-col">'
+        f'<div class="hero-scope-row">'
+        f'<span class="hero-scope-badge">REGIONAL INTELLIGENCE</span>'
+        f'<span class="hero-greeting-line">✦ {time_greeting}, <strong>{user_name}</strong> • AI Regional Dossier Active</span>'
+        f'</div>'
+        f'<div class="hero-branding-box">'
         f'<div class="hero-title-bn">{APP_NAME_BN}</div>'
         f'<div class="hero-subtitle">TRIKONDRISHTI · NEWS INTELLIGENCE</div>'
+        f'</div>'
         f'<div class="hero-tagline-row">'
         f'<span>VERIFIED SOURCES</span>'
         f'<span class="hero-tagline-divider"></span>'
@@ -636,13 +515,15 @@ def render_hero_banner():
         f'<span>TRI-PERSPECTIVE</span>'
         f'</div>'
         f'</div>'
-        f'<div>'
+        f'<div class="hero-weather-column">'
         f'<div class="hero-weather-box">'
         f'<div class="hero-weather-temp">{weather["temp_c"]}°C</div>'
-        f'<div class="hero-weather-city">{city}</div>'
-        f'<div class="hero-weather-condition">{weather["condition"]}</div>'
-        f'</div>'
+        f'<div class="hero-weather-meta">'
+        f'<div class="hero-weather-city">{city.upper()}</div>'
+        f'<div class="hero-weather-condition">{weather["condition"].upper()}</div>'
         f'<div class="hero-datetime">{now.strftime("%I:%M %p")} · {now.strftime("%a, %d %b %Y")}</div>'
+        f'</div>'
+        f'</div>'
         f'</div>'
         f'</div>'
     )
@@ -650,9 +531,8 @@ def render_hero_banner():
 
 
 
-
 def render_featured_story(doc: Document, rank: int = 1):
-    """Render the large featured story card (#1)."""
+    """Render the prominent lead featured story card (#1) with balanced proportions, story drift badge, and interactive Evidence Trail."""
     raw_title = html_lib.unescape(doc.metadata.get("title", "Untitled"))
     raw_summary = html_lib.unescape(doc.metadata.get("summary") or doc.page_content[:280])
     raw_source = html_lib.unescape(doc.metadata.get("source", "News"))
@@ -671,32 +551,70 @@ def render_featured_story(doc: Document, rank: int = 1):
     time_str = doc.metadata.get("time_ago") or doc.metadata.get("date", "")[:16]
     category = html_lib.escape(doc.metadata.get("category", "General"))
     location_tag = html_lib.escape(doc.metadata.get("location_tag") or loc.get("city", ""))
+    score = doc.metadata.get("composite_score", 88)
+
+    # RAG Intelligence: Story Drift & Evidence Trail
+    drift = detect_story_drift(doc)
+    trail = extract_evidence_trail(doc)
+
+    drift_badge_html = f'<span class="drift-badge {drift["css_class"]}" title="{html_lib.escape(drift["tooltip"])}">{drift["badge_label"]}</span>'
+    cat_badge_cls = _get_cat_badge_class(category)
+
+    citations_html = "".join(
+        f'<div class="evidence-citation-item">'
+        f'<div class="evidence-citation-src">{html_lib.escape(c.get("source", "Wire"))} <span class="evidence-citation-type">{html_lib.escape(c.get("type", "Citation"))}</span></div>'
+        f'<div class="evidence-citation-detail">{html_lib.escape(c.get("detail", ""))}</div>'
+        f'</div>'
+        for c in trail.get("citations", [])
+    )
+
+    trail_html = f'''
+    <details class="evidence-trail-container">
+      <summary class="evidence-trail-summary">
+        <span class="evidence-trail-icon">🔍</span>
+        <span class="evidence-trail-title">EVIDENCE TRAIL & SOURCE TRACE</span>
+        <span class="evidence-trail-confidence">{trail.get("confidence", 85)}% · {trail.get("confidence_label", "Verified")}</span>
+      </summary>
+      <div class="evidence-trail-body">
+        <div class="evidence-claim">
+          <span class="evidence-claim-label">CORE VERIFIED CLAIM</span>
+          <span class="evidence-claim-text">{html_lib.escape(trail.get("claim", ""))}</span>
+        </div>
+        <div class="evidence-citations-grid">{citations_html}</div>
+        <div class="evidence-trail-footer">
+          <span>✦ Verification: {html_lib.escape(trail.get("verification_mode", "Tri-Perspective"))}</span>
+          <span>Refreshed: {html_lib.escape(trail.get("timestamp", ""))}</span>
+        </div>
+      </div>
+    </details>
+    '''
 
     st.markdown(f'''
     <div class="featured-story">
-      <div class="featured-img">
-        <div class="featured-watermark">
-          <div class="featured-watermark-top">TRIKONDRISHTI</div>
-          <div class="featured-watermark-sub">LEAD INTELLIGENCE</div>
-        </div>
+      <div class="featured-meta-top">
+        <span class="lead-badge">#{rank} LEAD INTEL</span>
+        {drift_badge_html}
+        <span class="royal-box-badge {cat_badge_cls}">{category}</span>
+        <span class="meta-dot">·</span>
+        <span class="featured-source-name">{source}</span>
+        <span class="meta-dot">·</span>
+        <span class="featured-time-tag">{time_str}</span>
+        <span class="relevance-box" style="margin-left:auto">{score}% MATCH</span>
       </div>
-      <div class="featured-body">
-        <div class="featured-badge-row">
-          <span class="featured-rank">{rank}</span>
-          <span class="royal-box-badge">{category}</span>
-        </div>
-        <div class="featured-headline">
-          <a href="{url}" target="_blank">{title}</a>
-        </div>
-        <div class="featured-summary">{summary_esc}</div>
-        <div class="featured-meta">
-          <span class="featured-meta-source">{source}</span>
-          <span class="featured-meta-sep">/</span>
-          <span>{time_str}</span>
-          <span class="featured-meta-sep">/</span>
-          <span>{location_tag}</span>
-        </div>
+      <div class="featured-headline">
+        <a href="{url}" target="_blank">{title}</a>
       </div>
+      <div class="featured-summary">{summary_esc}</div>
+      <div class="featured-meta-bottom">
+        <span class="featured-loc-pill">📍 {location_tag or "National"}</span>
+        <span class="meta-dot">·</span>
+        <span class="featured-meta-item">Source: {source}</span>
+        <span class="meta-dot">·</span>
+        <span class="featured-meta-item">{time_str}</span>
+        <span class="meta-dot">·</span>
+        <span class="featured-meta-item">{category}</span>
+      </div>
+      {trail_html}
     </div>
     ''', unsafe_allow_html=True)
 
@@ -714,7 +632,7 @@ def render_story_row(doc: Document, rank: int, key_prefix: str = "sr"):
         summary = f"Reports from {raw_source} · Breaking development"
 
     title = html_lib.escape(raw_title)
-    excerpt = html_lib.escape(truncate_text(summary, 100))
+    excerpt = html_lib.escape(truncate_text(summary, 120))
     source = html_lib.escape(raw_source)
     url = doc.metadata.get("url", "#")
     time_str = doc.metadata.get("time_ago") or "Recent"
@@ -722,12 +640,19 @@ def render_story_row(doc: Document, rank: int, key_prefix: str = "sr"):
     location_tag = html_lib.escape(doc.metadata.get("location_tag") or "")
     score = doc.metadata.get("composite_score", 72)
 
+    # RAG Story Drift Check
+    drift = detect_story_drift(doc)
+    cat_badge_cls = _get_cat_badge_class(category)
+    drift_badge_html = ""
+    if drift["type"] in ("updated", "conflict"):
+        drift_badge_html = f'<span class="drift-badge {drift["css_class"]}" style="font-size:0.56rem;padding:1px 5px;margin-left:6px;vertical-align:middle;" title="{html_lib.escape(drift["tooltip"])}">{drift["badge_label"]}</span>'
+
     st.markdown(f'''
     <div class="story-row">
       <span class="story-rank">{rank}</span>
-      <span class="royal-box-badge" style="flex-shrink:0">{category}</span>
+      <span class="royal-box-badge {cat_badge_cls}" style="flex-shrink:0">{category}</span>
       <div class="story-content">
-        <div class="story-title"><a href="{url}" target="_blank">{title}</a></div>
+        <div class="story-title"><a href="{url}" target="_blank">{title}</a>{drift_badge_html}</div>
         <div class="story-excerpt">{excerpt}</div>
       </div>
       <div class="story-meta-right">
@@ -755,14 +680,10 @@ def render_right_panel(articles_count: int = 0, local_count: int = 0, global_cou
         <span class="rp-card-action">CHANGE</span>
       </div>
       <div class="local-news-card">
-        <div class="local-news-box">
-          <span class="local-news-box-tag">AREA</span>
-        </div>
-        <div class="local-news-info">
-          <div class="local-news-city">{city}, {region}</div>
-          <div class="local-news-desc">Regional news feed active</div>
-          <div class="location-access-box">LOCATION VERIFIED</div>
-        </div>
+        <div class="local-city-title">📍 {city.upper()}</div>
+        <div class="local-region-sub">{region}, India</div>
+        <div class="local-news-desc">Regional news feed active</div>
+        <div class="location-access-box">LOCATION VERIFIED</div>
       </div>
     </div>
     ''', unsafe_allow_html=True)
@@ -793,17 +714,17 @@ def render_right_panel(articles_count: int = 0, local_count: int = 0, global_cou
       </div>
       <div class="stats-grid">
         <div class="stat-cell">
-          <div class="stat-value">{articles_count or 12}</div>
+          <div class="stat-value">{articles_count or 52}</div>
           <div class="stat-label">Articles Today</div>
           <div class="stat-change">+3 vs yesterday</div>
         </div>
         <div class="stat-cell">
-          <div class="stat-value">{local_count or 8}</div>
+          <div class="stat-value">{local_count or 22}</div>
           <div class="stat-label">Regional Intel</div>
           <div class="stat-change">+2 vs yesterday</div>
         </div>
         <div class="stat-cell">
-          <div class="stat-value">{global_count or 16}</div>
+          <div class="stat-value">{global_count or 19}</div>
           <div class="stat-label">Global Wire</div>
           <div class="stat-change">+5 vs yesterday</div>
         </div>
@@ -834,17 +755,21 @@ def render_news_cards(docs: List[Document], max_items: int = 15, key_prefix: str
         return
 
     # View toggle
-    v_col1, v_col2 = st.columns([6, 1])
+    v_col1, v_col2 = st.columns([4.8, 2.2], gap="small")
     with v_col2:
-        view_toggle = st.radio(
-            "Display Mode",
-            ["Cards", "Table"],
-            index=0 if st.session_state.display_mode == "cards" else 1,
-            horizontal=True,
-            label_visibility="collapsed",
-            key=f"mode_{key_prefix}_{st.session_state.view}",
-        )
-        st.session_state.display_mode = view_toggle.lower()
+        mode_c1, mode_c2 = st.columns(2, gap="small")
+        with mode_c1:
+            is_cards = (st.session_state.display_mode == "cards")
+            if st.button("⊞ Cards", key=f"btn_mode_cards_{key_prefix}_{st.session_state.view}", type="primary" if is_cards else "secondary", use_container_width=True):
+                if not is_cards:
+                    st.session_state.display_mode = "cards"
+                    st.rerun()
+        with mode_c2:
+            is_table = (st.session_state.display_mode == "table")
+            if st.button("☰ Table", key=f"btn_mode_table_{key_prefix}_{st.session_state.view}", type="primary" if is_table else "secondary", use_container_width=True):
+                if not is_table:
+                    st.session_state.display_mode = "table"
+                    st.rerun()
 
     if st.session_state.display_mode == "table":
         rows_html = ""
@@ -900,11 +825,12 @@ def render_news_cards(docs: List[Document], max_items: int = 15, key_prefix: str
             score = doc.metadata.get("composite_score", 72)
 
             loc_html = f'<span class="tag-pill">{loc_tag}</span>' if loc_tag else ""
+            cat_badge_cls = _get_cat_badge_class(category)
 
             if score >= 85:
-                badge_html = '<span class="royal-box-badge">TOP STORY</span>'
+                badge_html = '<span class="royal-box-badge badge-general">★ TOP STORY</span>'
             elif score >= 70:
-                badge_html = '<span class="royal-box-badge">VERIFIED</span>'
+                badge_html = '<span class="royal-box-badge badge-tech">✦ VERIFIED</span>'
             else:
                 badge_html = '<span class="royal-box-badge">DISPATCH</span>'
 
@@ -914,7 +840,7 @@ def render_news_cards(docs: List[Document], max_items: int = 15, key_prefix: str
                 f'<div class="news-card-header"><span class="news-card-source">{source}</span><span class="news-card-time">{time_str}</span></div>'
                 f'<div class="news-card-title"><a href="{url}" target="_blank">{title}</a></div>'
                 f'<div class="news-card-summary">{summary_esc}</div>'
-                f'<div class="news-card-tags"><span class="royal-box-badge" style="font-size:0.6rem;padding:2px 7px">{category}</span>{loc_html}</div>'
+                f'<div class="news-card-tags"><span class="royal-box-badge {cat_badge_cls}" style="font-size:0.6rem;padding:2px 7px">{category}</span>{loc_html}</div>'
                 '</div>'
                 '<div class="news-card-footer">'
                 f'<div style="display:flex;align-items:center;gap:8px">{badge_html}<span style="color:var(--t-muted);font-size:0.68rem">· 2 min read</span></div>'
@@ -937,8 +863,8 @@ def render_news_cards(docs: List[Document], max_items: int = 15, key_prefix: str
                 b_source = doc.metadata.get("source", "")
                 url_hash = hashlib.md5(b_url.encode("utf-8", errors="ignore")).hexdigest()[:8]
                 if st.button(f"Save: {truncate_text(b_title, 20)}", key=f"bm_{key_prefix}_{idx}_{url_hash}"):
-                    if add_bookmark(b_title, b_url, b_source):
-                        st.session_state.bookmarks = load_bookmarks()
+                    if add_bookmark(b_title, b_url, b_source, username=raw_username):
+                        st.session_state.bookmarks = load_bookmarks(raw_username)
                         st.toast(f"Saved: {truncate_text(b_title, 30)}")
                     else:
                         st.toast("Already bookmarked.")
@@ -968,12 +894,10 @@ if st.session_state.view == "home":
     national_arts = st.session_state.cached_views.get("home_national", [])
     local_arts = st.session_state.cached_views.get("home_local", [])
 
-    # === ADAPTIVE THREE-COLUMN LAYOUT ===
-    if st.session_state.side_panel_open:
-        main_col, right_col = st.columns([2.65, 1.35])
-    else:
-        main_col = st.container()
-        right_col = None
+    # === ADAPTIVE TWO-COLUMN LAYOUT ===
+    with st.container():
+        st.markdown('<div class="main-content-anchor"></div>', unsafe_allow_html=True)
+        main_col, right_col = st.columns([2.33, 1.0], gap="medium")
 
     with main_col:
         # Hero Banner
@@ -1079,24 +1003,17 @@ if st.session_state.view == "home":
                     st.info(f"No {cat_name} news found.")
 
 
-    # === RIGHT PANEL ===
-    if right_col:
-        with right_col:
-            st.markdown('<div class="book-panel-wrapper"><div class="book-spine-crease"></div>', unsafe_allow_html=True)
-            bk_c1, bk_c2 = st.columns([3.2, 0.8])
-            with bk_c1:
-                st.markdown('<div class="panel-section-tag">TRENDS & INSIGHTS</div>', unsafe_allow_html=True)
-            with bk_c2:
-                if st.button("✕", key="fold_intel_book", help="Hide side panel"):
-                    st.session_state.side_panel_open = False
-                    st.rerun()
-
-            render_right_panel(
-                articles_count=len(global_arts) + len(national_arts) + len(local_arts),
-                local_count=len(local_arts),
-                global_count=len(global_arts),
-            )
-            st.markdown('</div>', unsafe_allow_html=True)
+    # === RIGHT SIDEBAR (30% Trends & Intelligence) ===
+    with right_col:
+        st.markdown('<div class="sidebar-wrapper">', unsafe_allow_html=True)
+        st.markdown('<div class="panel-section-tag"><span class="section-hdr-box"></span> TRENDS & INSIGHTS</div>', unsafe_allow_html=True)
+        render_right_panel(
+            articles_count=len(global_arts) + len(national_arts) + len(local_arts),
+            local_count=len(local_arts),
+            global_count=len(global_arts),
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)  # Close .main-content-layout
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1112,22 +1029,29 @@ elif st.session_state.view == "discover":
     st.caption("Multi-channel topic clusters & interactive AI news investigation")
 
     disc_topics = [
-        "AI & Generative Tech",
-        "Global Financial Markets",
-        "International Diplomacy",
-        "Green Energy & Climate",
-        "Space & Quantum Science",
-        "Semiconductor Supply Chains",
+        ("⚡ AI & Tech", "AI & Generative Tech"),
+        ("📈 Markets", "Global Financial Markets"),
+        ("🌐 Diplomacy", "International Diplomacy"),
+        ("🌿 Climate", "Green Energy & Climate"),
+        ("🚀 Space", "Space & Quantum Science"),
+        ("⚙️ Supply Chains", "Semiconductor Supply Chains"),
     ]
 
-    pill_cols = st.columns(len(disc_topics))
-    selected_stream = None
-    for i, t in enumerate(disc_topics):
-        with pill_cols[i]:
-            if st.button(t, key=f"stream_{i}", use_container_width=True):
-                selected_stream = t
+    if "discover_topic" not in st.session_state:
+        st.session_state.discover_topic = "AI & Generative Tech"
 
-    target_topic = selected_stream or "AI & Generative Tech"
+    st.markdown('<div class="sub-filter-row">', unsafe_allow_html=True)
+    pill_cols = st.columns(6, gap="small")
+    for i, (short_label, full_topic) in enumerate(disc_topics):
+        with pill_cols[i]:
+            is_active = (st.session_state.discover_topic == full_topic)
+            if st.button(short_label, key=f"stream_btn_{i}", type="primary" if is_active else "secondary", use_container_width=True, help=full_topic):
+                if not is_active:
+                    st.session_state.discover_topic = full_topic
+                    st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    target_topic = st.session_state.discover_topic
     with st.spinner(f"Retrieving and ranking {target_topic}..."):
         disc_docs = fetch_news(target_topic, hours=48)
         ranked_disc = ai_rank_articles(disc_docs, user_context=target_topic, llm=get_safe_llm())
@@ -1205,7 +1129,8 @@ elif st.session_state.view == "categories":
     if "active_cat_choice" not in st.session_state:
         st.session_state.active_cat_choice = available_categories[0]
 
-    cat_cols = st.columns(len(available_categories))
+    st.markdown('<div class="sub-filter-row">', unsafe_allow_html=True)
+    cat_cols = st.columns(len(available_categories), gap="small")
     for idx, cat_name in enumerate(available_categories):
         with cat_cols[idx]:
             is_active = (st.session_state.active_cat_choice == cat_name)
@@ -1213,6 +1138,7 @@ elif st.session_state.view == "categories":
             if st.button(btn_txt, key=f"cat_sel_btn_{idx}", use_container_width=True):
                 st.session_state.active_cat_choice = cat_name
                 st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
     sel_cat = st.session_state.active_cat_choice
     cache_key = f"view_cat_{sel_cat}"
@@ -1262,12 +1188,12 @@ elif st.session_state.view == "saved":
                 """, unsafe_allow_html=True)
             with b_col2:
                 if st.button("Remove", key=f"del_bm_{i}"):
-                    remove_bookmark(bm.get("url", ""))
-                    st.session_state.bookmarks = load_bookmarks()
+                    remove_bookmark(bm.get("url", ""), username=raw_username)
+                    st.session_state.bookmarks = load_bookmarks(raw_username)
                     st.rerun()
 
         if st.button("Clear All Bookmarks", key="clear_all_bm"):
-            save_bookmarks([])
+            save_bookmarks([], username=raw_username)
             st.session_state.bookmarks = []
             st.toast("All bookmarks cleared.")
             st.rerun()

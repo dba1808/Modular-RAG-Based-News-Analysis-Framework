@@ -12,6 +12,7 @@ import hashlib
 import streamlit as st
 from pathlib import Path
 from datetime import datetime
+from typing import Optional, Dict, Any, Tuple
 
 USERS_FILE = Path(__file__).parent / "users.yaml"
 
@@ -44,13 +45,194 @@ def _verify_password(password: str, hashed: str) -> bool:
         return False
 
 
+AUTH_COOKIE_NAME = "trikondrishti_auth"
+_AUTH_SECRET_FILE = Path(__file__).parent / ".auth_secret"
+
+
+def _get_auth_secret() -> str:
+    """Get or generate a persistent secret key for signing session tokens."""
+    if _AUTH_SECRET_FILE.exists():
+        try:
+            with open(_AUTH_SECRET_FILE, "r", encoding="utf-8") as f:
+                sec = f.read().strip()
+                if sec:
+                    return sec
+        except Exception:
+            pass
+    # Generate and store a strong secret key
+    import secrets
+    sec = secrets.token_urlsafe(32)
+    try:
+        with open(_AUTH_SECRET_FILE, "w", encoding="utf-8") as f:
+            f.write(sec)
+    except Exception:
+        pass
+    return sec
+
+
+def _create_auth_token(username: str, expiry_days: float = 14.0) -> str:
+    """Generate a cryptographically signed JWT session token."""
+    import jwt
+    from datetime import timezone, timedelta
+    secret = _get_auth_secret()
+    now_utc = datetime.now(timezone.utc)
+    payload = {
+        "sub": username.lower().strip(),
+        "iat": int(now_utc.timestamp()),
+        "exp": int((now_utc + timedelta(days=expiry_days)).timestamp()),
+    }
+    return jwt.encode(payload, secret, algorithm="HS256")
+
+
+def _verify_auth_token(token: str) -> Optional[str]:
+    """Verify and decode a signed JWT session token, returning username if valid."""
+    if not token or not isinstance(token, str):
+        return None
+    import jwt
+    secret = _get_auth_secret()
+    try:
+        payload = jwt.decode(token, secret, algorithms=["HS256"])
+        return payload.get("sub")
+    except Exception:
+        return None
+
+
+def _get_browser_cookie_token() -> Optional[str]:
+    """Inspect client HTTP cookies for an existing authenticated session token."""
+    # 1. Check Streamlit native incoming HTTP cookies
+    try:
+        if hasattr(st, "context") and hasattr(st.context, "cookies"):
+            raw = st.context.cookies.get(AUTH_COOKIE_NAME)
+            if raw:
+                return str(raw).strip()
+    except Exception:
+        pass
+
+    # 2. Check CookieManager fallback
+    try:
+        import extra_streamlit_components as stx
+        cm = stx.CookieManager(key="auth_cm_reader")
+        raw = cm.get(AUTH_COOKIE_NAME)
+        if raw:
+            return str(raw).strip()
+    except Exception:
+        pass
+
+    return None
+
+
+def _set_browser_cookie(username: str):
+    """Store the signed session token in the user's browser cookie."""
+    if not username:
+        return
+    token = _create_auth_token(username)
+    from datetime import timedelta
+
+    # 1. Set via extra_streamlit_components
+    try:
+        import extra_streamlit_components as stx
+        cm = stx.CookieManager(key="auth_cm_setter")
+        cm.set(
+            AUTH_COOKIE_NAME,
+            token,
+            expires_at=datetime.now() + timedelta(days=14),
+            same_site="lax",
+        )
+    except Exception:
+        pass
+
+    # 2. Set via client-side cookie header script for instant availability
+    try:
+        import streamlit.components.v1 as components
+        max_age = int(14 * 86400)
+        js = f"""
+        <script>
+        try {{
+          window.parent.document.cookie = "{AUTH_COOKIE_NAME}={token}; path=/; max-age={max_age}; SameSite=Lax;";
+        }} catch(e) {{}}
+        try {{
+          document.cookie = "{AUTH_COOKIE_NAME}={token}; path=/; max-age={max_age}; SameSite=Lax;";
+        }} catch(e) {{}}
+        </script>
+        """
+        components.html(js, height=0, scrolling=False)
+    except Exception:
+        pass
+
+
+def sync_auth_cookie(username: str):
+    """Public helper to keep the client cookie in sync with the active session."""
+    _set_browser_cookie(username)
+
+
+def _delete_browser_cookie():
+    """Wipe the authentication cookie from client browser."""
+    # 1. Delete via CookieManager
+    try:
+        import extra_streamlit_components as stx
+        cm = stx.CookieManager(key="auth_cm_deleter")
+        cm.delete(AUTH_COOKIE_NAME)
+    except Exception:
+        pass
+
+    # 2. Delete via JavaScript cookie expiration
+    try:
+        import streamlit.components.v1 as components
+        js = f"""
+        <script>
+        try {{
+          window.parent.document.cookie = "{AUTH_COOKIE_NAME}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0;";
+        }} catch(e) {{}}
+        try {{
+          document.cookie = "{AUTH_COOKIE_NAME}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0;";
+        }} catch(e) {{}}
+        </script>
+        """
+        components.html(js, height=0, scrolling=False)
+    except Exception:
+        pass
+
+
 def is_authenticated() -> bool:
-    """Check if a user is currently logged in strictly within their active session."""
-    return bool(st.session_state.get("authenticated", False) and st.session_state.get("user_profile"))
+    """
+    Check if a user is currently logged in.
+    1. Checks active session state.
+    2. If user explicitly logged out in this browser session, respect it.
+    3. If session state is empty (e.g. browser page refresh), seamlessly
+       re-authenticates from the client browser's signed session cookie.
+    4. Guarantees no identity leakage across separate browsers/devices.
+    """
+    if st.session_state.get("logged_out", False):
+        return False
+
+    # Fast path: already active in this WebSocket session
+    if st.session_state.get("authenticated", False) and st.session_state.get("user_profile"):
+        return True
+
+    # Re-authentication path on browser refresh
+    token = _get_browser_cookie_token()
+    if token:
+        valid_username = _verify_auth_token(token)
+        if valid_username:
+            users_data = _load_users().get("users", {})
+            user_entry = users_data.get(valid_username)
+            if user_entry:
+                profile = {
+                    "username": valid_username,
+                    "name": user_entry.get("name") or valid_username,
+                    "email": user_entry.get("email", ""),
+                    "role": user_entry.get("role", "reader"),
+                    "joined": user_entry.get("joined", ""),
+                }
+                st.session_state.authenticated = True
+                st.session_state.user_profile = profile
+                return True
+
+    return False
 
 
 def get_current_user() -> dict:
-    """Return the current logged-in user's profile, kept in sync with users.yaml."""
+    """Return the current logged-in user's profile, kept strictly per session."""
     profile = st.session_state.get("user_profile", {})
     if profile and profile.get("username"):
         u = profile.get("username")
@@ -67,11 +249,13 @@ def get_current_user() -> dict:
 
 
 def logout():
-    """Log out the current user and wipe active session."""
+    """Log out the current user, delete the browser session cookie, and wipe session state."""
     st.session_state.authenticated = False
     st.session_state.user_profile = {}
+    st.session_state.logged_out = True
     if "mobile_menu_open" in st.session_state:
         st.session_state.mobile_menu_open = False
+    _delete_browser_cookie()
     try:
         st.query_params.clear()
     except Exception:
@@ -80,7 +264,7 @@ def logout():
 
 
 def _do_login(username: str, password: str) -> bool:
-    """Validate credentials and authenticate the current user session."""
+    """Validate credentials, set persistent browser cookie, and authenticate session."""
     data = _load_users()
     users = data.get("users", {})
     user = users.get(username)
@@ -94,6 +278,8 @@ def _do_login(username: str, password: str) -> bool:
         }
         st.session_state.authenticated = True
         st.session_state.user_profile = profile
+        st.session_state.logged_out = False
+        _set_browser_cookie(username)
         try:
             st.query_params.clear()
         except Exception:
@@ -186,6 +372,8 @@ def _do_register(username: str, password: str, name: str, email: str) -> tuple:
     # Immediately authenticate in active session
     st.session_state.authenticated = True
     st.session_state.user_profile = profile
+    st.session_state.logged_out = False
+    _set_browser_cookie(u)
     try:
         st.query_params.clear()
     except Exception:
