@@ -20,7 +20,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional, Set
 import feedparser
 import requests
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 from config import (
     GNEWS_API_KEY,

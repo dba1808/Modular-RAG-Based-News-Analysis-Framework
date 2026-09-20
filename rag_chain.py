@@ -14,7 +14,8 @@ from typing import List, Dict, Any, Optional, Tuple
 
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
-from langchain.schema import Document, HumanMessage, SystemMessage
+from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage, SystemMessage
 from llm_factory import get_llm
 from config import (
     SYSTEM_PROMPT,

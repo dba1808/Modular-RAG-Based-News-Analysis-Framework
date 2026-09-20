@@ -19,7 +19,8 @@ from collections import Counter, defaultdict
 from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime, timezone, timedelta
 
-from langchain.schema import Document, HumanMessage, SystemMessage
+from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage, SystemMessage
 from news_fetcher import _parse_pub_date, format_time_ago, get_source_reliability
 
 logger = logging.getLogger("news_rag.intelligence")

@@ -17,7 +17,7 @@ import logging
 from typing import List, Optional, Tuple, Dict
 from datetime import datetime, timezone
 
-from langchain.schema import Document
+from langchain_core.documents import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS

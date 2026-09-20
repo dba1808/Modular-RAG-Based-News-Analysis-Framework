@@ -18,7 +18,7 @@ from typing import List, Dict, Any, Optional
 import requests as http_requests
 import streamlit as st
 import streamlit.components.v1 as components
-from langchain.schema import Document
+from langchain_core.documents import Document
 
 # ── Streamlit Page Configuration ──
 st.set_page_config(
